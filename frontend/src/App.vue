@@ -2,13 +2,23 @@
   <div class="container">
     <h1>Mi dApp en Algorand (Vue 3 + Pinia)</h1>
     
-    <p v-if="peraStore.isLoading">Cargando...</p>
+    <p v-if="peraStore.isLoading">Procesando...</p>
     
-    <p v-else-if="peraStore.isConnected">
-      Wallet conectada: <strong>{{ formatAddress(peraStore.account) }}</strong>
-    </p>
+    <div v-else-if="peraStore.isConnected">
+      <p>Wallet conectada: <strong>{{ formatAddress(peraStore.account) }}</strong></p>
+      
+      <div class="transfer-card">
+        <h3>Enviar ALGOs (TestNet)</h3>
+        <input v-model="receiver" placeholder="Dirección del receptor (Base32)" />
+        <input v-model.number="amount" type="number" step="0.1" placeholder="Monto en ALGO" />
+        <button @click="handleTransfer" class="sign" :disabled="!receiver || amount <= 0">
+          Enviar Pago Real
+        </button>
+      </div>
+    </div>
+
     <p v-else>
-      No hay wallet conectada. ¡Conéctate a la {{ peraStore.pera.chainId === 416002 ? 'MainNet' : 'otra red' }}!
+      No hay wallet conectada. ¡Conéctate a la TestNet!
     </p>
     
     <div class="buttons">
@@ -19,10 +29,6 @@
       <button @click="peraStore.disconnectWallet" v-else class="disconnect" :disabled="peraStore.isLoading">
         Desconectar
       </button>
-      
-      <button @click="peraStore.signTestTx" v-if="peraStore.isConnected" class="sign" :disabled="peraStore.isLoading">
-        Firmar transacción de prueba
-      </button>
     </div>
     
     <p v-if="peraStore.error" class="error-message">
@@ -32,18 +38,28 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { usePeraStore } from './stores/pera'
 
-// Inicializar el store
 const peraStore = usePeraStore()
+const receiver = ref('')
+const amount = ref(0)
 
-// Hook para iniciar la conexión (reconexión)
 onMounted(() => {
   peraStore.initConnection()
 })
 
-// Función de utilidad para acortar la dirección (mejor UX)
+const handleTransfer = async () => {
+  try {
+    const txId = await peraStore.sendTransaction(receiver.value, amount.value)
+    alert(`¡Transacción enviada!\nID: ${txId}`)
+    receiver.value = ''
+    amount.value = 0
+  } catch (err) {
+    console.error(err)
+  }
+}
+
 const formatAddress = (address) => {
   if (!address) return 'N/A'
   return `${address.substring(0, 8)}...${address.substring(address.length - 8)}`
@@ -51,10 +67,23 @@ const formatAddress = (address) => {
 </script>
 
 <style>
-.container { text-align: center; margin-top: 50px; }
-.buttons { margin-top: 20px; }
-button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
-.disconnect { background: #d32f2f; color: white; }
-.sign { background: #388e3c; color: white; }
-.error-message { color: #f44336; font-weight: bold; padding: 10px; border: 1px solid; margin-top: 15px; }
+/* ... tus estilos anteriores ... */
+.transfer-card {
+  background: #1e1e1e;
+  padding: 20px;
+  border-radius: 12px;
+  max-width: 400px;
+  margin: 20px auto;
+  border: 1px solid #333;
+}
+input {
+  display: block;
+  width: 90%;
+  margin: 10px auto;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #000;
+  color: #fff;
+}
 </style>
