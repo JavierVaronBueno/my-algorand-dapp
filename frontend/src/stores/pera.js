@@ -4,16 +4,19 @@ import { PeraWalletConnect } from "@perawallet/connect";
 import algosdk from "algosdk";
 
 // Usar el client de Algod para obtener parámetros de transacciones
+// TO DO: Mover estas constantes a un archivo de configuración o .env
 const ALGOD_NODE = "https://testnet-api.algonode.cloud"; // Mantener TestNet por defecto
-const algodClient = new algosdk.Algodv2("", ALGOD_NODE, "");
+const ALGOD_PORT = "";
+const ALGOD_TOKEN = "";
+const algodClient = new algosdk.Algodv2(ALGOD_TOKEN, ALGOD_NODE, ALGOD_PORT);
 
 // Creamos una instancia global de PeraWalletConnect.
 // Recomendación Senior: El chainId debe venir de una variable de entorno (.env)
 const peraWallet = new PeraWalletConnect({
-  // Configurado para TestNet (416001) por defecto, pero MainNet (416002) es común
+  // Configurado para TestNet (416002) por defecto, pero MainNet (416001) es común
   // Usaremos el ID estándar de Pera para Testnet
   // Nota: Si usas WalletConnect V2, Pera usa 416001 como chain ID
-  chainId: 416002, // Algorand MainNet, más realista para un producto final
+  chainId: 416002, // Algorand TestNet
 });
 
 export const usePeraStore = defineStore("pera", {
@@ -103,36 +106,50 @@ export const usePeraStore = defineStore("pera", {
     },
 
     /**
-     * @description Firma una transacción de prueba de 0 ALGO a sí mismo.
+     * @description Envía ALGOs reales a otra dirección
      */
-    async signTestTx() {
-      if (!this.account) return alert("¡Conecta tu wallet primero!");
+    async sendTransaction(receiverAddress, amountInAlgos) {
+      // 1. FORZAR RECUPERACIÓN DE CUENTA: 
+      // Si this.account es nulo, intentamos sacarlo de la sesión activa de Pera
+      // DEBUG: Vamos a ver qué tiene el estado antes de fallar
+      console.log("Estado actual de account:", this.account);
+      console.log("Receptor:", receiverAddress);
+      if (!this.account) {
+        const sessionAccounts = await peraWallet.reconnectSession();
+        if (sessionAccounts.length > 0) {
+          this.account = sessionAccounts[0];
+        } else {
+          this.error = "Error: No se encontró una cuenta activa. Reconecta tu wallet.";
+          throw new Error("Address must not be null or undefined");
+        }
+      }
 
       this.isLoading = true;
       this.error = null;
-      try {
-        // Obtener parámetros sugeridos (gas, fee, lastRound, etc.)
-        const suggestedParams = await algodClient.getTransactionParams().do();
 
-        // Crear la transacción de pago (Payment Transaction)
+      try {
+        const suggestedParams = await algodClient.getTransactionParams().do();
+        const amount = Math.round(Number(amountInAlgos) * 1000000);
+
+        // 2. CONSTRUCCIÓN ROBUSTA
         const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-          from: this.account,
-          to: this.account, // A sí mismo, coste 0
-          amount: 0,
+          sender: this.account, // Ahora estamos 100% seguros de que no es nulo
+          receiver: receiverAddress,
+          amount: amount,
           suggestedParams,
         });
 
-        // Solicitud de firma a Pera Wallet
-        const signedTxn = await peraWallet.signTransaction([txn]);
+        const signerPayload = [{ txn: txn, signers: [this.account] }];
+        const signedTxn = await peraWallet.signTransaction([signerPayload]);
 
-        console.log("Transacción firmada:", signedTxn);
-        alert("✅ Transacción de prueba firmada exitosamente!");
-
-        // Opcional: Para una prueba FULL, podrías enviarla a la red
-        // await algodClient.sendRawTransaction(signedTxn.blob).do();
+        // 3. ENVÍO Y ESPERA
+        const { txId } = await algodClient.sendRawTransaction(signedTxn).do();
+        
+        return txId;
       } catch (e) {
-        this.error = "Error al firmar: " + e.message;
-        console.error("Error al firmar:", e);
+        console.error("Error en sendTransaction:", e);
+        this.error = e.message || "Error en la firma";
+        throw e;
       } finally {
         this.isLoading = false;
       }
