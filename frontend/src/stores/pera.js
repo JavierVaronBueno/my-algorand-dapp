@@ -26,6 +26,8 @@ export const usePeraStore = defineStore("pera", {
     // Estado de carga o error
     isLoading: false,
     error: null,
+    // ID de USDC en Algorand TestNet
+    usdcAssetIndex: 10458941,
   }),
 
   getters: {
@@ -100,6 +102,60 @@ export const usePeraStore = defineStore("pera", {
       } catch (e) {
         this.error = "Error al desconectar: " + e.message;
         console.error("Error al desconectar:", e);
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    /**
+     * @description Envía tokens (ASAs) como USDC.
+     * @param {string} receiverAddress - Dirección del receptor.
+     * @param {number} amountInTokens - Monto (ej: 1.5 USDC).
+     * @param {number} assetIndex - ID del activo (por defecto USDC TestNet).
+     */
+    async sendAssetTransaction(receiverAddress, amountInTokens, assetIndex = 10458941) {
+      if (!this.account) throw new Error("Wallet no conectada");
+      
+      this.isLoading = true;
+      this.error = null;
+
+      try {
+        const suggestedParams = await algodClient.getTransactionParams().do();
+        
+        /**
+         * NOTA SENIOR: USDC tiene 6 decimales. 
+         * Para enviar 1 USDC, debemos enviar 1,000,000 unidades.
+         */
+        const decimals = 6; 
+        const amount = Math.round(Number(amountInTokens) * Math.pow(10, decimals));
+
+        // CONSTRUCCIÓN DE ASSET TRANSFER
+        const txn = algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject({
+          sender: this.account,
+          receiver: receiverAddress,
+          amount: amount,
+          assetIndex: assetIndex,
+          suggestedParams,
+        });
+
+        const signerPayload = [{ txn: txn, signers: [this.account] }];
+        const signedTxn = await peraWallet.signTransaction([signerPayload]);
+
+        const { txId } = await algodClient.sendRawTransaction(signedTxn).do();
+        
+        // Esperar confirmación (Opcional pero recomendado)
+        await algosdk.waitForConfirmation(algodClient, txId, 4);
+        
+        return txId;
+      } catch (e) {
+        console.error("Error en Asset Transaction:", e);
+        // Error común: El receptor no tiene hecho el "Opt-in" al token
+        if (e.message.includes("overspend")) {
+            this.error = "Fondos insuficientes o falta Opt-in del receptor.";
+        } else {
+            this.error = e.message;
+        }
+        throw e;
       } finally {
         this.isLoading = false;
       }
